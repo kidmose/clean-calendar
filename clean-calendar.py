@@ -25,7 +25,7 @@ override = {
     
 for e in events:
     items = [ (k,v) for (k,v) in e.items() if k in outputable ]
-    for (k,v) in override:
+    for k,v in override.items():
         items.append((k, v))
     out.add_component(Event(items))
 
