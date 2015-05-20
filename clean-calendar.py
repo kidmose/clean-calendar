@@ -4,12 +4,39 @@ import sys, os
 from icalendar import Calendar, Event
 import requests
 
-url = sys.argv[1]
-r = requests.get(url)
-ical = Calendar.from_ical(r.content)
-events = [ e for e in ical.subcomponents if isinstance(e, Event) ]
+class HttpSources:
+    def __init__(self, url):
+        self._url = url
+    def get(self):
+        r = requests.get(url)
+        cal = Calendar.from_ical(r.content)
+        return cal
 
-out = Calendar()
+class Cleaner:
+    def __init__(self, outputable, override):
+        self._outputable = outputable
+        self._override = override
+    def clean(self, cal):
+        events = [ e for e in cal.subcomponents if isinstance(e, Event) ]
+        out = Calendar()
+
+        for e in events:
+            items = [ (k,v) for (k,v) in e.items() if k in outputable ]
+            for k,v in override.items():
+                items.append((k, v))
+                out.add_component(Event(items))
+        return out
+
+class FilePublisher:
+    def __init__(self, filename):
+        self._filename = filename
+    def publish(self, cal):
+        with open(filename, 'wb') as f:
+            f.write(cal.to_ical())
+
+url = sys.argv[1]
+orig_cal = HttpSources(url).get()
+
 outputable = ( 
     "STATUS", 
     "DTSTART", 
@@ -18,19 +45,10 @@ outputable = (
     "TRANSP",
     "STATUS",
 )
-
 override = {
     "SUMMARY": "Private",
 }
+clean_cal = Cleaner(outputable, override).clean(orig_cal)
     
-for e in events:
-    items = [ (k,v) for (k,v) in e.items() if k in outputable ]
-    for k,v in override.items():
-        items.append((k, v))
-    out.add_component(Event(items))
-
 filename = os.path.join(os.path.dirname(sys.argv[0]), "clean-calendar.ics")
-with open(filename, 'wb') as f:
-    f.write(out.to_ical())
-
-
+FilePublisher(filename).publish(clean_cal)
