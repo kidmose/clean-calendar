@@ -4,8 +4,10 @@ import json
 from subprocess import Popen
 
 CLIENT_ID_FILE = "app-oauth.json"
+AUTH_FILE = "auth.json"
 
 #TODO: Include usage instructions
+#TODO: Logging
 
 """
 Client id for use against google OAUTH2 API. 
@@ -42,21 +44,45 @@ TODO: Don't depend in firefox
 """
 class AuthorizationCode:
   def __init__(self, localfile, clientid, scope):
-    req = {
-      "response_type": "code",
-      "client_id": clientid.client_id,
-      "redirect_uri": clientid.redirect_uri,
-      "scope": (" ".join(scope))
-    }
-    r = requests.get(clientid.base_url + "auth?%s" % urlencode(req),
-                     allow_redirects=False)
-    if r.status_code != 302:
-      raise Exception("Invalid HTTP status code (%s), response: \n%s)" % (r.status_code, r.text))
+    self.code = None
 
-    url = r.headers.get('location')
-    Popen(["firefox", url])
+    try:
+      with open(localfile, 'r') as f:
+        self.code = json.load(f)['auth_code']
+        print "Authorisation code loaded from file"
+    except IOError:
+      print "Authorization code not loaded from file"
 
-    self.code = raw_input("\nAuthorization Code >>> ")
+    if self.code is None:
+      print "Trying to obtain Authorization Code"
+      req = {
+        "response_type": "code",
+        "client_id": clientid.client_id,
+        "redirect_uri": clientid.redirect_uri,
+        "scope": (" ".join(scope))
+      }
+      r = requests.get(clientid.base_url + "auth?%s" % urlencode(req),
+                       allow_redirects=False, 
+      )
+      if r.status_code != 302:
+        raise Exception("Invalid HTTP status code (%s), response: \n%s)" % (r.status_code, r.text)) 
+      
+      from pprint import pprint 
+      pprint("##### HEADERS #####")
+      pprint(r.headers)
+      pprint("##### BODY #####")
+      pprint(r.text)
+
+      url = r.headers.get('location')
+      Popen(["firefox", url])
+      self.code = raw_input("\nAuthorization Code >>> ")
+      print "Authorization Code obtained"
+
+      
+      with open(localfile, 'w+') as f:
+        json.dump({'auth_code': self.code}, f)
+        print "Authorization Code saved to file"
+
     self.clientid = clientid
 
 """
@@ -72,9 +98,11 @@ class AccessToken:
       "grant_type": "authorization_code",
     }
     content_length=len(urlencode(req))
-    req['content-length'] = str(content_length)
+    req['content-length'] = str(content_length) #TODO: Investigate if this makes any sense(goes into body...)
 
-    r = requests.post(authcode.clientid.base_url + "token", data=req)
+    r = requests.post(authcode.clientid.base_url + "token", 
+                      data=req,
+    )
     if r.status_code != 200:
       raise Exception("Invalid HTTP status code (%s), response: \n%s)" % (r.status_code, r.text))
     data = json.loads(r.text)
@@ -97,7 +125,8 @@ def get_calendar_list():
   authorization_header = {"Authorization": "OAuth %s" % access_token}
 
   r = requests.get("https://www.googleapis.com/calendar/v3/users/me/calendarList",
-                   headers=authorization_header)
+                   headers=authorization_header,
+                 )
   return r.text
 
 
@@ -139,7 +168,9 @@ def get_events_list():
     authorization_header = {"Authorization": "OAuth %s" % access_token}
     url = ("https://www.googleapis.com/calendar/v3/calendars/%s/events" % 
            (quote_plus(calendar_id), ))
-    r = requests.get(url, headers=authorization_header)
+    r = requests.get(url, 
+                     headers=authorization_header,
+    )
 
     events = json.loads(r.text)
     for event in events['items']:
@@ -152,7 +183,7 @@ def get_events_list():
 def main():
   cid = ClientId(CLIENT_ID_FILE)
   ac = AuthorizationCode(
-    None, 
+    AUTH_FILE,
     cid, 
     ['https://www.googleapis.com/auth/userinfo.profile',
      'https://www.googleapis.com/auth/userinfo.email',
