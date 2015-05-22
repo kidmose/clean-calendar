@@ -56,3 +56,6 @@ docs/_build/
 # PyBuilder
 target/
 clean-calendar.ics
+
+# Other
+/app-oauth.json

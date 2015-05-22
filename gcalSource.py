@@ -1,74 +1,73 @@
-# -*- coding: utf-8 -*-
-
 import requests
 from urllib import urlencode, quote_plus
 import json
 from subprocess import Popen
 
-client_id = "871810524450-rle77t9mrhoob7ab3aq67gsfjqvf9fea.apps.googleusercontent.com"
-client_secret = "22AZcKwoLratSWsduL_piarS"
-redirect_uri = "urn:ietf:wg:oauth:2.0:oob"
-base_url = r"https://accounts.google.com/o/oauth2/"
-authorization_code = ""
-access_token = ""
+#TODO: Include usage instructions
 
 """
-Retrieving authorization_code from authorization API.
+Client id for use against google OAUTH2 API. 
+
+The identity of this application authorised to the google API.
+TODO: Load from JSON file, rather than hard code. 
 """
-def retrieve_authorization_code():
-  authorization_code_req = {
-    "response_type": "code",
-    "client_id": client_id,
-    "redirect_uri": redirect_uri,
-    "scope": (r"https://www.googleapis.com/auth/userinfo.profile" +
-              r" https://www.googleapis.com/auth/userinfo.email" +
-              r" https://www.googleapis.com/auth/calendar.readonly")
+class ClientId:
+  def __init__(self):
+    self.client_id = "871810524450-rle77t9mrhoob7ab3aq67gsfjqvf9fea.apps.googleusercontent.com"
+    self.client_secret = "22AZcKwoLratSWsduL_piarS"
+    self.redirect_uri = "urn:ietf:wg:oauth:2.0:oob"
+    self.base_url = r"https://accounts.google.com/o/oauth2/"
+
+""" 
+Authorization code.
+
+Authorisation code from google oauth2 api, retrieved on initialisation. 
+TODO: Store result in file
+TODO: Load result from file
+TODO: Don't depend in firefox
+"""
+class AuthorizationCode:
+  def __init__(self, localfile, clientid, scope):
+    req = {
+      "response_type": "code",
+      "client_id": clientid.client_id,
+      "redirect_uri": clientid.redirect_uri,
+      "scope": (" ".join(scope))
     }
+    r = requests.get(clientid.base_url + "auth?%s" % urlencode(req),
+                     allow_redirects=False)
 
-  r = requests.get(base_url + "auth?%s" % urlencode(authorization_code_req),
-                   allow_redirects=False)
-  print "Something gibberish"
-  url = r.headers.get('location')
-  Popen(["firefox", url])
+    url = r.headers.get('location')
+    Popen(["firefox", url])
 
-  authorization_code = raw_input("\nAuthorization Code >>> ")
-  return authorization_code
-
+    self.code = raw_input("\nAuthorization Code >>> ")
+    self.clientid = clientid
 
 """
-Retrieving access_token and refresh_token from Token API.
+Access Token
 """
-def retrieve_tokens(authorization_code):
-  access_token_req = {
-    "code" : authorization_code,
-    "client_id" : client_id,
-    "client_secret" : client_secret,
-    "redirect_uri" : redirect_uri,
-    "grant_type": "authorization_code",
+class AccessToken:
+  def __init__(self, authcode): 
+    req = {
+      "code" : authcode.code,
+      "client_id" : authcode.clientid.client_id,
+      "client_secret" : authcode.clientid.client_secret,
+      "redirect_uri" : authcode.clientid.redirect_uri,
+      "grant_type": "authorization_code",
     }
-  content_length=len(urlencode(access_token_req))
-  access_token_req['content-length'] = str(content_length)
+    content_length=len(urlencode(req))
+    req['content-length'] = str(content_length)
 
-  r = requests.post(base_url + "token", data=access_token_req)
-  data = json.loads(r.text)
-  return data
+    r = requests.post(authcode.clientid.base_url + "token", data=req)
+    data = json.loads(r.text)
 
+    self.access_token = data['access_token']
 
-
-"""
-Sample code of fetching user information from userinfo API.
-"""
-def get_userinfo():
-  global authorization_code
-  authorization_code = retrieve_authorization_code()
-  tokens = retrieve_tokens(authorization_code)
-  access_token = tokens['access_token']
-  authorization_header = {"Authorization": "OAuth %s" % access_token}
-  r = requests.get("https://www.googleapis.com/oauth2/v2/userinfo", 
-                   headers=authorization_header)
-  print r.text
-
-
+  """
+  Quthentification header dict
+  """
+  def getHeader(self):
+    return {"Authorization": "OAuth %s" % self.access_token}
 
 def get_calendar_list():
   global authorization_code
@@ -133,7 +132,20 @@ def get_events_list():
 
 
 def main():
-  get_events_list()
+  cid = ClientId()
+  ac = AuthorizationCode(
+    None, 
+    cid, 
+    ['https://www.googleapis.com/auth/userinfo.profile',
+     'https://www.googleapis.com/auth/userinfo.email',
+     'https://www.googleapis.com/auth/calendar.readonly'],
+  )
+  at = AccessToken(ac)
+  
+  r = requests.get("https://www.googleapis.com/oauth2/v2/userinfo", 
+                   headers=at.getHeader())
+  print r.text
+  
 
 
 if __name__ == '__main__':
