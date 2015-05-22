@@ -3,20 +3,34 @@ from urllib import urlencode, quote_plus
 import json
 from subprocess import Popen
 
+CLIENT_ID_FILE = "app-oauth.json"
+
 #TODO: Include usage instructions
 
 """
 Client id for use against google OAUTH2 API. 
 
 The identity of this application authorised to the google API.
-TODO: Load from JSON file, rather than hard code. 
+TODO: Load redirect_uri and base_url from file
 """
 class ClientId:
-  def __init__(self):
-    self.client_id = "871810524450-rle77t9mrhoob7ab3aq67gsfjqvf9fea.apps.googleusercontent.com"
-    self.client_secret = "22AZcKwoLratSWsduL_piarS"
+  def __init__(self, localfile):
+    try: 
+      self.data = json.load(open(localfile, 'r'))
+    except:
+      print "Failed to open file"
+      raise
+    
     self.redirect_uri = "urn:ietf:wg:oauth:2.0:oob"
     self.base_url = r"https://accounts.google.com/o/oauth2/"
+
+  @property
+  def client_id(self):
+    return self.data['installed']['client_id']
+
+  @property
+  def client_secret(self):
+    return self.data['installed']['client_secret']
 
 """ 
 Authorization code.
@@ -36,6 +50,8 @@ class AuthorizationCode:
     }
     r = requests.get(clientid.base_url + "auth?%s" % urlencode(req),
                      allow_redirects=False)
+    if r.status_code != 302:
+      raise Exception("Invalid HTTP status code (%s), response: \n%s)" % (r.status_code, r.text))
 
     url = r.headers.get('location')
     Popen(["firefox", url])
@@ -59,6 +75,8 @@ class AccessToken:
     req['content-length'] = str(content_length)
 
     r = requests.post(authcode.clientid.base_url + "token", data=req)
+    if r.status_code != 200:
+      raise Exception("Invalid HTTP status code (%s), response: \n%s)" % (r.status_code, r.text))
     data = json.loads(r.text)
 
     self.access_token = data['access_token']
@@ -132,7 +150,7 @@ def get_events_list():
 
 
 def main():
-  cid = ClientId()
+  cid = ClientId(CLIENT_ID_FILE)
   ac = AuthorizationCode(
     None, 
     cid, 
