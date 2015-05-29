@@ -13,7 +13,6 @@ AUTH_FILE = "auth.json"
 Client id for use against google OAUTH2 API. 
 
 The identity of this application authorised to the google API.
-TODO: Load redirect_uri and base_url from file
 """
 class ClientId:
   def __init__(self, localfile):
@@ -23,9 +22,6 @@ class ClientId:
       print "Failed to open file"
       raise
     
-    self.redirect_uri = "urn:ietf:wg:oauth:2.0:oob"
-    self.base_url = r"https://accounts.google.com/o/oauth2/"
-
   @property
   def client_id(self):
     return self.data['installed']['client_id']
@@ -33,6 +29,19 @@ class ClientId:
   @property
   def client_secret(self):
     return self.data['installed']['client_secret']
+
+  @property
+  def auth_uri(self):
+    return self.data['installed']['auth_uri']
+
+  @property
+  def token_uri(self):
+    return self.data['installed']['token_uri']
+
+  @property
+  def redirect_uri(self):
+    """Return first redirect uri in redirect_uris"""
+    return self.data['installed']['redirect_uris'][0]
 
 """ 
 Authorization code.
@@ -61,7 +70,7 @@ class AuthorizationCode:
         "redirect_uri": clientid.redirect_uri,
         "scope": (" ".join(scope))
       }
-      r = requests.get(clientid.base_url + "auth?%s" % urlencode(req),
+      r = requests.get(clientid.auth_uri + "?%s" % urlencode(req),
                        allow_redirects=False, 
       )
       if r.status_code != 302:
@@ -100,7 +109,7 @@ class AccessToken:
     content_length=len(urlencode(req))
     req['content-length'] = str(content_length) #TODO: Investigate if this makes any sense(goes into body...)
 
-    r = requests.post(authcode.clientid.base_url + "token", 
+    r = requests.post(authcode.clientid.token_uri, 
                       data=req,
     )
     if r.status_code != 200:
