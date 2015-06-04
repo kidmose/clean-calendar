@@ -4,64 +4,95 @@ import json
 from subprocess import Popen
 
 CLIENT_ID_FILE = "app-oauth.json"
-AUTH_FILE = "auth.json"
+REFRESH_TOKEN_FILE = "auth.json"
 
 #TODO: Include usage instructions
 #TODO: Logging
-#TODO: Persistence of refresh token
-#TODO: Refactor to a single object
 
-"""
-Client id for use against google OAUTH2 API. 
 
-The identity of this application authorised to the google API.
-"""
-class ClientId:
-  def __init__(self, localfile):
-    try: 
-      self.data = json.load(open(localfile, 'r'))
-    except:
-      print "Failed to open file"
-      raise
+class Authenticator:
+  """
+  Implements authentification against googles OAuth 2.0 API
+
+  Usage: 
+  >>> scope = ['https://www.googleapis.com/auth/userinfo.profile',
+  >>>          'https://www.googleapis.com/auth/userinfo.email',
+  >>>          'https://www.googleapis.com/auth/calendar.readonly']
+  >>> auth = Authenticator(client_id_file, refresh_token_file, scope)
+  >>> access_token = auth.getAccessToken()
+  """
+  def __init__(self, client_id_file, refresh_token_file, scope):
+    """
+    Loads relevant data, if available
+    """
+
+    client_id = self._loadClientId(client_id_file)
+    refresh_token = self._loadRefreshToken(refresh_token_file)
+    if refresh_token is None:
+      print "Getting tokens through authorization code"
+      ac = self._getAuthorizationCode(client_id, scope)
+      (access_token, refresh_token) = self._redeemAuthorizationCode(ac, client_id)
+      with open(refresh_token_file, 'w+') as f:
+        json.dump({'refresh_token': refresh_token}, f)
+        
+    self.client_id = client_id 
+    self.refresh_token = refresh_token
     
-  @property
-  def client_id(self):
-    return self.data['installed']['client_id']
+  def getAccessToken(self):
+    """
+    Returns an Access Token and takes care of house keeping. 
 
-  @property
-  def client_secret(self):
-    return self.data['installed']['client_secret']
+    If refresh token is available it is used, 
+    if not the user authorization process is followed. 
+    """
+    print "Getting access tokens with refresh token"
+    access_token = self._redeemRefreshToken(self.refresh_token, self.client_id)
+    return access_token    
 
-  @property
-  def auth_uri(self):
-    return self.data['installed']['auth_uri']
+  def _loadClientId(self, client_id_file):
+    """ 
+    Loads client id and corresponding values from json file. 
 
-  @property
-  def token_uri(self):
-    return self.data['installed']['token_uri']
+    The json file can be downloaded from googles developer console.
+    """
+    print "Loading client id from %s" % client_id_file 
+    try:
+      with open(client_id_file, 'r') as f:
+        json_data = json.load(f)
+      return json_data['installed']
+    except:
+      print "Failed to load client id"
+      raise
+    print "Loaded client id"
 
-  @property
-  def redirect_uri(self):
-    """Return first redirect uri in redirect_uris"""
-    return self.data['installed']['redirect_uris'][0]
+  def _loadRefreshToken(self, refresh_token_file):
+    """
+    Loads refresh token from file. 
+    """
+    print "Loading refresh token from file %s" % refresh_token_file 
+    try:
+      with open(refresh_token_file, 'r') as f:
+        json_data = json.load(f)
+        token = json_data['refresh_token']
+        print "Refresh token loaded"
+        return token
+    except:
+      print "No refresh token loaded"
+      return None
 
-""" 
-Authorization code.
-
-Authorisation code from google oauth2 api, retrieved on initialisation. 
-TODO: Don't depend in firefox
-"""
-class AuthorizationCode:
-  def __init__(self, localfile, clientid, scope):
-
-    print "Trying to obtain Authorization Code"
+  def _getAuthorizationCode(self, client_id, scope):
+    """ Retrieves authorization code. 
+    
+    TODO: Don't depend in firefox
+    """
+    print "Getting authorization token"
     req = {
       "response_type": "code",
-      "client_id": clientid.client_id,
-      "redirect_uri": clientid.redirect_uri,
+      "client_id": client_id['client_id'],
+      "redirect_uri": client_id['redirect_uris'][0], # Need to pick one from the list
       "scope": (" ".join(scope))
     }
-    r = requests.get(clientid.auth_uri + "?%s" % urlencode(req),
+    r = requests.get(client_id['auth_uri'] + "?%s" % urlencode(req),
                      allow_redirects=False, 
     )
     if r.status_code != 302:
@@ -69,88 +100,60 @@ class AuthorizationCode:
       
     url = r.headers.get('location')
     Popen(["firefox", url])
-    self.code = raw_input("\nAuthorization Code >>> ")
+    code = raw_input("\nAuthorization Code >>> ")
     print "Authorization Code obtained"
-    
-    from pprint import pprint 
-    pprint("##### HEADERS #####")
-    pprint(r.headers)
-    pprint("##### BODY #####")
-    pprint(r.text)
-    
-    self.clientid = clientid
+    return code
 
-"""
-Access Token
-"""
-class AccessToken:
-  def __init__(self, authcode): 
+  def _redeemAuthorizationCode(self, authorization_code, client_id):
+    """
+    Redeems an authorization code for access and refresh tokens.
+    """
     req = {
-      "code" : authcode.code,
-      "client_id" : authcode.clientid.client_id,
-      "client_secret" : authcode.clientid.client_secret,
-      "redirect_uri" : authcode.clientid.redirect_uri,
+      "code" : authorization_code,
+      "client_id" : client_id['client_id'],
+      "client_secret" : client_id['client_secret'],
+      "redirect_uri": client_id['redirect_uris'][0], # Need to pick one from the list
       "grant_type": "authorization_code",
     }
     content_length=len(urlencode(req))
     req['content-length'] = str(content_length) #TODO: Investigate if this makes any sense(goes into body...)
 
-    r = requests.post(authcode.clientid.token_uri, 
+    r = requests.post(client_id['token_uri'], 
                       data=req,
     )
     if r.status_code != 200:
       raise Exception("Invalid HTTP status code (%s), response: \n%s)" % (r.status_code, r.text))
-    print "Access Token obtained"
-        
-    from pprint import pprint 
-    pprint("##### HEADERS #####")
-    pprint(r.headers)
-    pprint("##### BODY #####")
-    pprint(r.text)
-    
-    data = json.loads(r.text)
+    data = r.json()
+    print "Tokens obtained from Authorization Code"
+    return (data['access_token'], data['refresh_token'])
 
-    self.access_token = data['access_token']
-    self.refresh_token = data['refresh_token']
-
-    self.clientid = authcode.clientid
-
-
-  """
-  Authentification header dict
-  """
-  def getAuthHeader(self):
-    return {"Authorization": "OAuth %s" % self.access_token}
-
-  """
-  Uses refresh token to obtain a new access token
-  """
-  def renew(self):
+  def _redeemRefreshToken(self, refresh_token, client_id):
+    """
+    Redeems a refresh token for a access token and a new refresh token
+    """
     req = {
-      "refresh_token" : self.refresh_token,
-      "client_id" : self.clientid.client_id,
-      "client_secret" : self.clientid.client_secret,
+      "refresh_token" : refresh_token,
+      "client_id" : client_id['client_id'],
+      "client_secret" : client_id['client_secret'],
       "grant_type": "refresh_token",
     }
     content_length=len(urlencode(req))
     req['content-length'] = str(content_length) #TODO: Investigate if this makes any sense(goes into body...)
 
-    r = requests.post(self.clientid.token_uri, 
+    r = requests.post(client_id['token_uri'], 
                       data=req,
     )
     if r.status_code != 200:
       raise Exception("Invalid HTTP status code (%s), response: \n%s)" % (r.status_code, r.text))
-    print "Access Token obtained"
-        
-    from pprint import pprint 
-    pprint("##### HEADERS #####")
-    pprint(r.headers)
-    pprint("##### BODY #####")
-    pprint(r.text)
-    
-    data = json.loads(r.text)
+    data = r.json()
+    print "Access token obtained from Refresh Token"
+    return data['access_token']
 
-    self.access_token = data['access_token']
+  """
+  Authentification header dict
+  """
+  def getAuthHeader(self):
+    return {"Authorization": "OAuth %s" % self.getAccessToken()}
 
 
 def get_calendar_list():
@@ -219,23 +222,18 @@ def get_events_list():
 
 
 def main():
-  cid = ClientId(CLIENT_ID_FILE)
-  ac = AuthorizationCode(
-    AUTH_FILE,
-    cid, 
-    ['https://www.googleapis.com/auth/userinfo.profile',
-     'https://www.googleapis.com/auth/userinfo.email',
-     'https://www.googleapis.com/auth/calendar.readonly'],
-  )
-  at = AccessToken(ac)
+  scope = ['https://www.googleapis.com/auth/userinfo.profile',
+           'https://www.googleapis.com/auth/userinfo.email',
+           'https://www.googleapis.com/auth/calendar.readonly']
+  auth = Authenticator(CLIENT_ID_FILE, REFRESH_TOKEN_FILE, scope)
+  access_token = auth.getAccessToken()
   
   r = requests.get("https://www.googleapis.com/oauth2/v2/userinfo", 
-                   headers=at.getAuthHeader())
+                   headers=auth.getAuthHeader())
   print r.text
 
-  at.renew()
   r = requests.get("https://www.googleapis.com/oauth2/v2/userinfo", 
-                   headers=at.getAuthHeader())
+                   headers=auth.getAuthHeader())
   print r.text
 
 if __name__ == '__main__':
